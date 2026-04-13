@@ -36,15 +36,15 @@ for FILE in $STAGED; do
     CONTENT=$(git show ":$FILE" 2>/dev/null || cat "$FILE")
 
     # ---- Check: Private keys ----
-    if echo "$CONTENT" | grep -qP '^.*-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'; then
+    if echo "$CONTENT" | grep -qP -- '-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'; then
         echo -e "${RED}SECRET DETECTED${NC} in ${FILE}: private key found"
         SECRETS_FOUND=1
     fi
 
     # ---- Check: Password/secret/token assignments ----
-    # Matches: PASSWORD=xxx, SECRET_KEY=xxx, TOKEN=xxx, etc. where value is 8+ non-whitespace chars
-    # Excludes: placeholder values like "CHANGE_ME", empty values, or comments
-    MATCHES=$(echo "$CONTENT" | grep -nP '(PASSWORD|SECRET|TOKEN|API_KEY|PRIVATE_KEY|ACCESS_KEY|PASS)\s*=\s*\S{8,}' 2>/dev/null | grep -vP '=\s*(CHANGE_ME|""|'"''"'\s*$|\$\{?\w+\}?|openssl.rand|your-|example|placeholder|#)' || true)
+    # Excludes: placeholders, empty values, variable references, shell commands like $(openssl rand)
+    MATCHES=$(echo "$CONTENT" | grep -nP '(PASSWORD|SECRET|TOKEN|API_KEY|PRIVATE_KEY|ACCESS_KEY|PASS)\s*=\s*\S{8,}' 2>/dev/null \
+        | grep -vP '=\s*(CHANGE_ME|""|'"''"'\s*$|\$\{?\w+\}?|openssl\.rand|your-|example|placeholder|#|\$\()' || true)
     if [ -n "$MATCHES" ]; then
         echo -e "${RED}SECRET DETECTED${NC} in ${FILE}:"
         echo "$MATCHES" | while read -r line; do
@@ -75,14 +75,14 @@ for FILE in $STAGED; do
     fi
 
     # ---- Check: High-entropy strings (40+ base64 chars) ----
-    # Skip lines that are just variable references (${VAR}) or template placeholders
-    MATCHES=$(echo "$CONTENT" | grep -nP '[A-Za-z0-9+/]{40,}={0,2}' 2>/dev/null | grep -vP '\$\{?\w+\}?|placeholder|example|CHANGE_ME|template' || true)
+    # Warn-only, not blocked. Skip variable refs, templates, and shell generators.
+    MATCHES=$(echo "$CONTENT" | grep -nP '[A-Za-z0-9+/]{40,}={0,2}' 2>/dev/null \
+        | grep -vP '\$\{?\w+\}?|placeholder|example|CHANGE_ME|template|openssl\.rand|\$\(' || true)
     if [ -n "$MATCHES" ]; then
         echo -e "${YELLOW}SUSPICIOUS${NC} in ${FILE}: high-entropy string (check if it's a secret)"
         echo "$MATCHES" | while read -r line; do
             echo "  $line"
         done
-        # Don't block on these — just warn
     fi
 done
 

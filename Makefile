@@ -135,3 +135,6 @@ clean: ## Remove all containers, volumes, and generated configs
 	rm -f traefik/dynamic/authentik.yml smtp/main.cf smtp/sender_rewrite
 	rm -rf data/ traefik/logs/
 	@echo "Cleaned. Run 'make setup' to redeploy."
+
+firewall: ## Apply UFW firewall rules (80, 443, 22222 only)
+	bash firewall.sh

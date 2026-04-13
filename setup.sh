@@ -204,7 +204,18 @@ sudo chgrp backup-access .env docker-compose.yml 2>/dev/null || true
 sudo chmod 640 .env docker-compose.yml 2>/dev/null || true
 
 # =============================================================================
-# 7. Docker daemon hardening
+# 7. UFW firewall rules
+# =============================================================================
+log "Configuring UFW firewall..."
+
+if command -v ufw >/dev/null 2>&1; then
+    bash "${DEPLOY_DIR}/firewall.sh"
+else
+    warn "ufw not found — skipping firewall. Install with: sudo apt install ufw"
+fi
+
+# =============================================================================
+# 8. Docker daemon hardening
 # =============================================================================
 log "Configuring Docker daemon..."
 
