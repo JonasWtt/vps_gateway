@@ -155,6 +155,19 @@ else
 fi
 
 # =============================================================================
+# 4c. Install Traefik log rotation
+# =============================================================================
+log "Installing Traefik log rotation..."
+
+if [ -d /etc/logrotate.d ]; then
+    sudo cp "${DEPLOY_DIR}/logrotate/traefik" /etc/logrotate.d/traefik
+    sudo chmod 644 /etc/logrotate.d/traefik
+    log "Traefik logrotate installed (daily rotation, 7 days retention, 50M max)"
+else
+    warn "logrotate not found — skipping Traefik log rotation"
+fi
+
+# =============================================================================
 # 5. SMTP SASL password
 # =============================================================================
 log "Setting up SMTP relay..."
