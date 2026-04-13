@@ -163,6 +163,121 @@ DMARC:  _dmarc.grenzweg.site.  IN TXT  "v=DMARC1; p=reject; rua=mailto:noreply@g
 
 DKIM is handled by IONOS automatically for their relay.
 
+## Server Prerequisites
+
+These are system-level security prerequisites that should be in place **before** running `setup.sh`. They are outside the scope of the deployment itself but critical for a secure production environment.
+
+### Prerequisite Checker
+
+A prerequisite validation script is included:
+
+```bash
+bash check-prerequisites.sh
+```
+
+This checks for: required commands, Docker daemon config, user permissions, network connectivity, UFW status, fail2ban, AppArmor, kernel security parameters, SSH configuration, DNS records, and backup tools. It exits non-zero if any hard requirement is missing and prints warnings for recommended hardening.
+
+### Required Prerequisites
+
+| Prerequisite | Purpose | How to verify |
+|---|---|---|
+| Docker Engine + Compose v2 | Container runtime | `docker compose version` |
+| User in `docker` group | Non-root container management | `groups $(whoami) \| grep docker` |
+| `openssl`, `htpasswd`, `curl`, `git`, `jq` | Setup tooling | `which openssl htpasswd curl git jq` |
+| `/etc/docker/daemon.json` | Docker hardening (no-new-privileges, log rotation, live-restore) | `cat /etc/docker/daemon.json` |
+| UFW firewall active | Only ports 80, 443, SSH_PORT exposed | `sudo ufw status` |
+| fail2ban running | Brute-force protection for SSH and Authentik | `sudo systemctl status fail2ban` |
+| unattended-upgrades | Automatic security patches | `sudo systemctl status unattended-upgrades` |
+| AppArmor enabled | Container isolation (Docker relies on this) | `sudo aa-status` |
+| SSH publickey-only | No password authentication | `sudo sshd -T \| grep passwordauthentication` |
+| SSH on non-default port | Reduce scan noise | `grep '^Port' /etc/ssh/sshd_config` |
+
+### Recommended Kernel Hardening (sysctl)
+
+These kernel parameters strengthen the server against network and privilege escalation attacks. Apply them via `/etc/sysctl.d/99-hardening.conf`:
+
+```ini
+# Address Space Layout Randomization
+kernel.randomize_va_space = 2
+
+# Restrict kernel pointer access
+kernel.kptr_restrict = 1
+
+# Restrict dmesg (kernel log) to root
+kernel.dmesg_restrict = 1
+
+# No SUID core dumps
+fs.suid_dumpable = 0
+
+# Network hardening
+net.ipv4.tcp_syncookies = 1
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.default.accept_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.default.accept_source_route = 0
+net.ipv4.icmp_echo_ignore_broadcasts = 1
+net.ipv4.icmp_ignore_bogus_error_responses = 1
+net.ipv4.tcp_rfc1337 = 1
+
+# BPF JIT hardening (mitigates BPF-based attacks)
+net.core.bpf_jit_harden = 2
+
+# Log martian packets
+net.ipv4.conf.all.log_martians = 1
+net.ipv4.conf.default.log_martians = 1
+```
+
+Apply with: `sudo sysctl --system`
+
+### Current System Audit Findings
+
+The following items were identified on this server as potential hardening opportunities (**not changed yet** — listed for review):
+
+| # | Finding | Risk | Current State | Recommendation |
+|---|---|---|---|---|
+| 1 | `fs.suid_dumpable=2` | Low — allows SUID core dumps (root-readable only) | 2 (softened) | Set to 0 for strictest policy |
+| 2 | `kernel.dmesg_restrict=0` | Medium — any user can read kernel ring buffer | 0 (unrestricted) | Set to 1 |
+| 3 | `kernel.kptr_restrict=0` | Medium — kernel addresses visible via /proc/kallsyms | 0 (unrestricted) | Set to 1 |
+| 4 | `net.core.bpf_jit_harden=0` | Low — BPF JIT not hardened | 0 (off) | Set to 2 |
+| 5 | `net.ipv4.icmp_echo_ignore_broadcasts=0` | Low — responds to ICMP broadcast | 0 (responds) | Set to 1 |
+| 6 | `net.ipv4.tcp_rfc1337=0` | Low — TIME_WAIT assassination not mitigated | 0 (off) | Set to 1 |
+| 7 | No auditd/framework | Medium — no system call auditing | not installed | Install `auditd` for compliance |
+| 8 | `/dev/shm` is world-writable (default) | Low — shared memory abuse potential | 1777 | Consider `nodev,noexec,nosuid` mount options |
+| 9 | No USB/module blacklist | Low — unused kernel modules loaded | default | Blacklist unused modules |
+| 10 | `PermitRootLogin yes` in sshd_config | **High** — root login permitted | yes | Set to `prohibit-password` or `no` |
+
+### Additional Security Hardening Recommendations (from research)
+
+These go beyond the current setup and are worth considering:
+
+**Server-level:**
+- **auditd** — System call auditing for post-incident forensics (`sudo apt install auditd`)
+- **AIDE** — File integrity monitoring to detect unauthorized changes (`sudo apt install aide`)
+- **sysctl hardening** — Apply the full `/etc/sysctl.d/99-hardening.conf` above
+- **/dev/shm mount options** — Add `nodev,noexec,nosuid` to `/dev/shm` in `/etc/fstab`
+- **Cgroup v2 resources** — Set memory+cpu limits per container (partially done via docker-compose `deploy.resources`)
+- **logrotate for journald** — Limit journal size: `SystemMaxFileSize=50M`, `SystemMaxFiles=10` in `/etc/systemd/journald.conf`
+
+**Authentik-specific (from official docs):**
+- **Disable default flows** after initial setup — the "default-authentication-flow" and "default-enrollment-flow" are broad; create custom flows with tighter controls
+- **Enable token lengthening** — increase default token lifetime if needed, or decrease for higher security
+- **Rate limit login attempts** — Authentik has built-in rate limiting in flows; verify it's enabled
+- **Email verification** — require email verification for enrollment flows
+- **MFA enforcement** — require TOTP/WebAuthn for all admin accounts
+- **Separate admin tenant** — use a dedicated tenant for admin access with stricter policies
+- **Review outposts** — disable any unused outposts to reduce attack surface
+
+**Traefik-specific (from official docs):**
+- **Disable API/Dashboard in production** — `api.insecure=false` is already set ✅
+- **Use TLS 1.3 only** — add `minVersion: VersionTLS13` to the TLS config if all clients support it
+- **Enable forward authentication** — use Authentik as a forward auth provider for other services behind Traefik
+- **Restrict entrypoints** — the web entrypoint only needs to accept HTTP (for ACME challenges) and HTTPS; no other protocols
+- **Observability** — add Traefik metrics (Prometheus) for anomaly detection
+
 ## Security Checklist
 
 - [x] All containers `cap_drop: ALL` with minimal `cap_add`
@@ -189,6 +304,50 @@ DKIM is handled by IONOS automatically for their relay.
 - [ ] Dashboard IP allowlist updated with your IPs
 
 ## Updating
+
+```bash
+# Pull new images
+docker compose pull
+
+# Recreate changed containers
+docker compose up -d
+
+# Apply new blueprints if needed
+make blueprints
+```
+
+## File Inventory
+
+| File | Purpose | Tracked |
+|------|---------|---------|
+| `docker-compose.yml` | Full stack definition with hardening | ✅ |
+| `setup.sh` | One-shot deployment script | ✅ |
+| `render.sh` | Template rendering script | ✅ |
+| `check-prerequisites.sh` | Prerequisite validation | ✅ |
+| `check-health.sh` | Container + endpoint health monitor | ✅ |
+| `check-certs.sh` | TLS cert expiry monitor | ✅ |
+| `backup-restic.sh` | Encrypted backup script | ✅ |
+| `firewall.sh` | UFW firewall rules | ✅ |
+| `Makefile` | Common operations | ✅ |
+| `.env.example` | Environment template | ✅ |
+| `.gitignore` | Excludes secrets and rendered files | ✅ |
+| `.githooks/pre-commit` | Secret leak prevention | ✅ |
+| `traefik/dynamic/authentik.yml.template` | Traefik routes + middlewares | ✅ |
+| `smtp/main.cf.template` | Postfix relay config | ✅ |
+| `smtp/sender_rewrite.template` | Sender rewriting map | ✅ |
+| `smtp/sasl_passwd.example` | SMTP auth template | ✅ |
+| `fail2ban/filter-authentik.conf` | Authentik log filter | ✅ |
+| `fail2ban/jail-authentik.conf` | Authentik jail config | ✅ |
+| `logrotate/traefik` | Traefik log rotation | ✅ |
+| `README.md` | This file | ✅ |
+| `.env` | Secrets and config | ❌ gitignored |
+| `smtp/sasl_passwd` | SMTP credentials | ❌ gitignored |
+| `smtp/sasl_passwd.db` | Compiled SASL map | ❌ gitignored |
+| `traefik/dynamic/authentik.yml` | Rendered Traefik config | ❌ gitignored |
+| `smtp/main.cf` | Rendered Postfix config | ❌ gitignored |
+| `smtp/sender_rewrite` | Rendered sender map | ❌ gitignored |
+| `data/` | Persistent data (DB, certs, etc.) | ❌ gitignored |
+| `traefik/logs/` | Traefik access logs | ❌ gitignored |
 
 ```bash
 # Pull new images
