@@ -35,7 +35,13 @@ command -v openssl >/dev/null 2>&1 || err "openssl not installed."
 # =============================================================================
 if [ -f .env ]; then
     log ".env found — validating..."
-    set -a; source .env; set +a
+    # Read .env manually to preserve literal $ in values (e.g. htpasswd)
+    while IFS='=' read -r key value; do
+        [[ -z "${key}" || "${key}" == \#* ]] && continue
+        key="${key# }"; key="${key% }"
+        value="${value# }"; value="${value% }"
+        export "${key}"="${value}"
+    done < .env
     [ -z "${PG_PASS:-}" ] && err "PG_PASS not set in .env"
     [ -z "${REDIS_PASS:-}" ] && err "REDIS_PASS not set in .env"
     [ -z "${AUTHENTIK_SECRET_KEY:-}" ] && err "AUTHENTIK_SECRET_KEY not set in .env"
@@ -82,7 +88,16 @@ EOF
 fi
 
 # Source .env for all following steps
-set -a; source .env; set +a
+# Read .env manually to preserve literal $ in values (e.g. htpasswd).
+# Docker-compose .env files use $$ for literal $ — we un-escape for templates.
+while IFS='=' read -r key value; do
+    [[ -z "${key}" || "${key}" == \#* ]] && continue
+    key="${key# }"; key="${key% }"
+    value="${value# }"; value="${value% }"
+    # Un-escape $$ → $ for template rendering (docker-compose uses $$ for literal $)
+    value="${value//\\$\\$/\\$}"
+    export "${key}"="${value}"
+done < .env
 
 # Derive BASE_DOMAIN (strip subdomain: auth.example.com → example.com)
 BASE_DOMAIN="${AUTHENTIK_DOMAIN#*.}"
@@ -104,7 +119,7 @@ render_template() {
             -e "s|{{SMTP_RELAY_HOST}}|${SMTP_RELAY_HOST}|g" \
             -e "s|{{SMTP_RELAY_PORT}}|${SMTP_RELAY_PORT}|g" \
             -e "s|{{SMTP_RELAY_USER}}|${SMTP_RELAY_USER}|g" \
-            -e "s|{{TRAEFIK_DASHBOARD_AUTH}}|${TRAEFIK_DASHBOARD_AUTH:-admin:\$apr1\$placeholder}|g" \
+            -e "s|{{TRAEFIK_DASHBOARD_AUTH}}|${TRAEFIK_DASHBOARD_AUTH}|g" \
             "${src}" > "${dst}"
         log "  Rendered: ${dst}"
     else
