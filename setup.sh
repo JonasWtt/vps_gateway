@@ -2,6 +2,8 @@
 # =============================================================================
 # Authentik + Traefik — One-shot setup script
 # Run this on a fresh Ubuntu 24.04 server to deploy the full stack.
+# Reads .env for all configuration; renders templates for Traefik and Postfix.
+# Safe to re-run (idempotent).
 # =============================================================================
 set -euo pipefail
 
@@ -32,8 +34,7 @@ command -v openssl >/dev/null 2>&1 || err "openssl not installed."
 # 2. Check for .env or create from template
 # =============================================================================
 if [ -f .env ]; then
-    log ".env found — using existing secrets"
-    # Validate that required vars are set
+    log ".env found — validating..."
     set -a; source .env; set +a
     [ -z "${PG_PASS:-}" ] && err "PG_PASS not set in .env"
     [ -z "${REDIS_PASS:-}" ] && err "REDIS_PASS not set in .env"
@@ -46,9 +47,6 @@ if [ -f .env ]; then
     [ "${SMTP_RELAY_PASS:-}" = "CHANGE_ME" ] && err "SMTP_RELAY_PASS not set in .env"
 else
     log "No .env found — generating from template with random secrets"
-    warn "You MUST edit .env before proceeding!"
-    warn "Set: ACME_EMAIL, AUTHENTIK_DOMAIN, TRAEFIK_DOMAIN, SMTP_RELAY_*"
-
     PG_PASS=$(openssl rand -base64 32 | tr -d '=/+')
     REDIS_PASS=$(openssl rand -base64 48 | tr -d '=/+')
     AUTHENTIK_SECRET_KEY=$(openssl rand -base64 60 | tr -d '=/+')
@@ -80,15 +78,46 @@ SMTP_RELAY_PASS=CHANGE_ME
 EOF
 
     chmod 600 .env
-    log "Template .env created with random secrets"
-    err "Edit .env now and re-run setup.sh. Aborting."
+    err "Template .env created with random secrets. Edit .env and re-run setup.sh."
 fi
 
 # Source .env for all following steps
 set -a; source .env; set +a
 
+# Derive BASE_DOMAIN (strip subdomain: auth.example.com → example.com)
+BASE_DOMAIN="${AUTHENTIK_DOMAIN#*.}"
+HOSTNAME_FQDN="$(hostname -f 2>/dev/null || hostname)"
+
 # =============================================================================
-# 3. Create data directories
+# 3. Render config templates from .env
+# =============================================================================
+log "Rendering config templates from .env..."
+
+render_template() {
+    local src="$1" dst="$2"
+    if [ -f "${src}" ]; then
+        sed \
+            -e "s|{{AUTHENTIK_DOMAIN}}|${AUTHENTIK_DOMAIN}|g" \
+            -e "s|{{TRAEFIK_DOMAIN}}|${TRAEFIK_DOMAIN}|g" \
+            -e "s|{{BASE_DOMAIN}}|${BASE_DOMAIN}|g" \
+            -e "s|{{HOSTNAME}}|${HOSTNAME_FQDN}|g" \
+            -e "s|{{SMTP_RELAY_HOST}}|${SMTP_RELAY_HOST}|g" \
+            -e "s|{{SMTP_RELAY_PORT}}|${SMTP_RELAY_PORT}|g" \
+            -e "s|{{SMTP_RELAY_USER}}|${SMTP_RELAY_USER}|g" \
+            -e "s|{{TRAEFIK_DASHBOARD_AUTH}}|${TRAEFIK_DASHBOARD_AUTH:-admin:\$apr1\$placeholder}|g" \
+            "${src}" > "${dst}"
+        log "  Rendered: ${dst}"
+    else
+        warn "  Template not found: ${src} (skipping)"
+    fi
+}
+
+render_template "traefik/dynamic/authentik.yml.template" "traefik/dynamic/authentik.yml"
+render_template "smtp/main.cf.template" "smtp/main.cf"
+render_template "smtp/sender_rewrite.template" "smtp/sender_rewrite"
+
+# =============================================================================
+# 4. Create data directories
 # =============================================================================
 log "Creating data directories..."
 
@@ -97,48 +126,26 @@ mkdir -p traefik/dynamic traefik/logs
 chmod 777 data/certs  # Traefik needs write access for acme.json
 
 # =============================================================================
-# 4. SMTP SASL password
+# 5. SMTP SASL password
 # =============================================================================
 log "Setting up SMTP relay..."
 
-if [ ! -f smtp/sasl_passwd ] || [ ! -f smtp/sasl_passwd.db ]; then
+if [ ! -f smtp/sasl_passwd ] || [ ! -s smtp/sasl_passwd ]; then
     echo "[${SMTP_RELAY_HOST}]:${SMTP_RELAY_PORT} ${SMTP_RELAY_USER}:${SMTP_RELAY_PASS}" > smtp/sasl_passwd
     chmod 600 smtp/sasl_passwd
+fi
 
-    # Generate sasl_passwd.db — try postmap on host, fall back to container
+if [ ! -f smtp/sasl_passwd.db ]; then
     if command -v postmap >/dev/null 2>&1; then
         postmap smtp/sasl_passwd
     else
-        log "postmap not found on host — starting temporary container to generate sasl_passwd.db"
-        docker compose run --rm --no-deps smtp postmap /etc/postfix/sasl_passwd 2>/dev/null || {
-            # Alternative: use a one-off postfix container
-            docker run --rm -v "$(pwd)/smtp:/etc/postfix" mwader/postfix-relay postmap /etc/postfix/sasl_passwd
-        }
-        # postmap inside container writes to /etc/postfix/sasl_passwd.db which maps to smtp/
-        # But the :ro mount on main.cf would block. We only mount the smtp dir.
+        log "postmap not found on host — using Docker container to generate sasl_passwd.db"
+        docker run --rm -v "$(pwd)/smtp:/etc/postfix" mwader/postfix-relay postmap /etc/postfix/sasl_passwd
     fi
     log "SASL password database generated"
 else
-    log "sasl_passwd and sasl_passwd.db already exist, skipping"
+    log "sasl_passwd.db already exists, skipping"
 fi
-
-# Update main.cf with the correct relayhost and domain
-sed -i "s|^relayhost = .*|relayhost = [${SMTP_RELAY_HOST}]:${SMTP_RELAY_PORT}|" smtp/main.cf
-sed -i "s|^myhostname = .*|myhostname = $(hostname -f)|" smtp/main.cf
-DOMAIN="${AUTHENTIK_DOMAIN#*.}"
-sed -i "s|^mydomain = .*|mydomain = ${DOMAIN}|" smtp/main.cf
-
-# Update sender_rewrite with the SMTP user
-sed -i "s|/^.+$/  .*|/^.+$/  ${SMTP_RELAY_USER}|" smtp/sender_rewrite
-
-# =============================================================================
-# 5. Update Traefik dynamic config with domain
-# =============================================================================
-log "Updating Traefik dynamic config with domain..."
-
-sed -i "s/\`auth\.[^)]*\`/\`auth.${DOMAIN}\`/g" traefik/dynamic/authentik.yml 2>/dev/null || true
-# Note: AUTHENTIK_DOMAIN may include subdomain. Use the full domain for Host() rules.
-# If your authentik domain differs from the pattern, edit traefik/dynamic/authentik.yml manually.
 
 # =============================================================================
 # 6. Create backup-access group
@@ -149,7 +156,6 @@ if ! getent group backup-access >/dev/null 2>&1; then
     sudo groupadd backup-access
 fi
 sudo usermod -aG backup-access "$(whoami)"
-log "backup-access group created. You may need to log out/in for group to take effect."
 
 # Make .env and docker-compose.yml readable by backup group
 sudo chgrp backup-access .env docker-compose.yml 2>/dev/null || true
@@ -207,7 +213,7 @@ fi
 
 chmod +x backup-restic.sh
 
-# Add cron job for daily backups
+# Add cron job for daily backups (idempotent)
 CRON_LINE="0 2 * * * sg backup-access -c '${DEPLOY_DIR}/backup-restic.sh'"
 (crontab -l 2>/dev/null | grep -v "backup-restic"; echo "$CRON_LINE") | crontab -
 log "Backup cron job installed (daily at 02:00)"
@@ -221,12 +227,16 @@ docker compose pull
 docker compose up -d
 
 log "Waiting for containers to become healthy..."
-for i in $(seq 1 12); do
-    UNHEALTHY=$(docker compose ps --format '{{.Health}}' 2>/dev/null | grep -v "healthy\|^$" | wc -l)
+for i in $(seq 1 18); do
+    UNHEALTHY=$(docker compose ps --format '{{.Health}}' 2>/dev/null | grep -cv "healthy\|^$" || true)
     if [ "${UNHEALTHY}" -eq 0 ]; then
+        log "All containers healthy"
         break
     fi
-    echo "  Waiting for containers... ($i/12)"
+    if [ "$i" -eq 18 ]; then
+        warn "Some containers not healthy after 3 minutes. Check: docker compose ps"
+    fi
+    echo "  Waiting... ($i/18)"
     sleep 10
 done
 
@@ -283,7 +293,7 @@ log "  Setup complete!"
 log "============================================"
 echo ""
 echo "  Authentik:   https://${AUTHENTIK_DOMAIN}"
-echo "  Dashboard:  https://${TRAEFIK_DOMAIN}"
+echo "  Dashboard:   https://${TRAEFIK_DOMAIN}"
 echo ""
 echo "Next steps:"
 echo "  1. Create your admin account at:"
@@ -294,7 +304,7 @@ echo ""
 echo "  3. Add DNS records for SPF/DMARC (improves deliverability)"
 echo ""
 echo "  4. (Optional) Add your IP to the Traefik dashboard allowlist in:"
-echo "     traefik/dynamic/authentik.yml"
+echo "     traefik/dynamic/authentik.yml.template"
 echo ""
 log "Save your .env and restic password securely!"
 echo "  Restic password: ${RESTIC_PASS_FILE}"

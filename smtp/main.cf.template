@@ -1,5 +1,6 @@
-# Postfix relay-only configuration for IONOS SMTP relay
-# Customize: relayhost, myhostname, mydomain, sender_canonical_maps
+# Postfix relay-only configuration
+# Domain and relay settings are templated by setup.sh from .env values.
+# Do not edit domain/relay references directly — edit .env and re-run setup.sh.
 
 compatibility_level = 3.6
 
@@ -8,9 +9,9 @@ inet_interfaces = all
 inet_protocols = ipv4
 mynetworks_style = subnet
 
-# Hostname and domain
-myhostname = gateway.grenzweg.site
-mydomain = grenzweg.site
+# Hostname and domain (templated from .env)
+myhostname = {{HOSTNAME}}
+mydomain = {{BASE_DOMAIN}}
 myorigin = $mydomain
 
 # No local delivery — relay everything outbound
@@ -18,21 +19,21 @@ mydestination =
 local_recipient_maps =
 local_transport = error:local delivery disabled
 
-# Relay through IONOS (STARTTLS on port 587)
-relayhost = [smtp.ionos.de]:587
+# Relay through SMTP provider (STARTTLS, templated from .env)
+relayhost = [{{SMTP_RELAY_HOST}}]:{{SMTP_RELAY_PORT}}
 
 # TLS for outbound connections
 smtp_tls_security_level = encrypt
 smtp_tls_wrapper_mode = no
 smtp_tls_loglevel = 1
 
-# SASL authentication for IONOS
+# SASL authentication (templated from .env)
 smtp_sasl_auth_enable = yes
 smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
 smtp_sasl_security_options = noanonymous
 smtp_sasl_tls_security_options = noanonymous
 
-# Sender rewriting — all outgoing mail appears from noreply@grenzweg.site
+# Sender rewriting — all outgoing mail appears from the configured sender (templated from .env)
 sender_canonical_maps = regexp:/etc/postfix/sender_rewrite
 
 # Resource limits

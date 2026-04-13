@@ -1,5 +1,7 @@
 # =============================================================================
 # Traefik Dynamic Configuration - Hardened
+#Domains are templated by setup.sh from .env values.
+#Do not edit domain references directly — edit .env and re-run setup.sh.
 # =============================================================================
 
 http:
@@ -32,12 +34,12 @@ http:
         average: 100
         burst: 50
 
-    # Dashboard basic auth
+    # Dashboard basic auth (password from .env: TRAEFIK_DASHBOARD_AUTH)
     dashboard-auth:
       basicAuth:
         realm: "Traefik Dashboard"
         users:
-          - "admin:$apr1$1fEOE/E.$ku02KYBJBNeP5hTuop4KE."
+          - "{{TRAEFIK_DASHBOARD_AUTH}}"
 
     # Dashboard IP allowlist (Tailscale + localhost + private ranges)
     dashboard-allowlist:
@@ -55,7 +57,7 @@ http:
   routers:
     # Authentik - main
     authentik:
-      rule: "Host(`auth.grenzweg.site`)"
+      rule: "Host(`{{AUTHENTIK_DOMAIN}}`)"
       service: authentik
       entryPoints:
         - websecure
@@ -67,7 +69,7 @@ http:
 
     # Authentik - API
     authentik-api:
-      rule: "Host(`auth.grenzweg.site`) && (PathPrefix(`/api/`) || PathPrefix(`/application/o/`))"
+      rule: "Host(`{{AUTHENTIK_DOMAIN}}`) && (PathPrefix(`/api/`) || PathPrefix(`/application/o/`))"
       service: authentik
       entryPoints:
         - websecure
@@ -79,7 +81,7 @@ http:
 
     # Traefik dashboard - restricted access
     traefik-dashboard:
-      rule: "Host(`traefik.grenzweg.site`)"
+      rule: "Host(`{{TRAEFIK_DOMAIN}}`)"
       service: api@internal
       entryPoints:
         - websecure

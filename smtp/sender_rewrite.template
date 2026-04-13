@@ -1,0 +1,4 @@
+# Sender rewrite map for Postfix
+# All outgoing mail is rewritten to this address
+# This file is templated by setup.sh from .env (SMTP_RELAY_USER)
+/^.+$/  {{SMTP_RELAY_USER}}
