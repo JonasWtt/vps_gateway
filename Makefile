@@ -66,6 +66,9 @@ pull: ## Pull latest images
 check-certs: ## Check TLS certificate expiry
 	sudo bash check-certs.sh
 
+health-check: ## Check all container + endpoint health
+	bash check-health.sh
+
 health: ## Check all container health
 	@$(COMPOSE) ps --format "table {{.Name}}\t{{.Status}}\t{{.Health}}"
 
