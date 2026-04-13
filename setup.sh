@@ -141,6 +141,20 @@ mkdir -p traefik/dynamic traefik/logs
 chmod 777 data/certs  # Traefik needs write access for acme.json
 
 # =============================================================================
+# 4b. Install fail2ban Authentik jail
+# =============================================================================
+log "Installing fail2ban Authentik jail..."
+
+if command -v fail2ban-client >/dev/null 2>&1; then
+    sudo cp "${DEPLOY_DIR}/fail2ban/filter-authentik.conf" /etc/fail2ban/filter.d/authentik.conf
+    sudo cp "${DEPLOY_DIR}/fail2ban/jail-authentik.conf" /etc/fail2ban/jail.d/authentik.conf
+    sudo fail2ban-client reload 2>/dev/null || true
+    log "Fail2ban Authentik jail installed"
+else
+    warn "fail2ban not found — skipping Authentik jail. Install with: sudo apt install fail2ban"
+fi
+
+# =============================================================================
 # 5. SMTP SASL password
 # =============================================================================
 log "Setting up SMTP relay..."
