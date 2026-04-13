@@ -16,7 +16,7 @@ while IFS='=' read -r key value; do
     key="${key# }"; key="${key% }"
     value="${value# }"; value="${value% }"
     export "${key}"="${value}"
-done < .env 2>/dev/null || true
+done < <(cat .env; echo) 2>/dev/null || true
 
 FAILURES=""
 WARNINGS=""

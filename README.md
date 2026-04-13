@@ -63,6 +63,7 @@ After setup, go to `https://auth.yourdomain.com/if/flow/initial-setup/` to creat
 | `backup-restic.sh` | Encrypted backup script | tracked |
 | `check-certs.sh` | TLS cert expiry monitor | tracked |
 | `check-health.sh` | Container + endpoint health monitor | tracked |
+| `render.sh` | Template rendering script | tracked |
 | `setup.sh` | One-shot deployment script | tracked |
 
 All `*.template` files use `{{PLACEHOLDER}}` syntax. `setup.sh` renders them to final config files by substituting values from `.env`. The rendered files (`authentik.yml`, `main.cf`, `sender_rewrite`) are gitignored.
@@ -178,7 +179,7 @@ DKIM is handled by IONOS automatically for their relay.
 - [x] Traefik access log rotation (7 days, 50M max)
 - [x] fail2ban with 5 jails (sshd, sshd-root, recidive, traefik-scan, authentik)
 - [x] UFW firewall: only 80, 443, and SSH_PORT (configured in .env)
-- [x] Secrets in `.env` (chmod 600, root-owned)
+- [x] Secrets in `.env` (chmod 640, group-readable for backup script)
 - [x] Dashboard auth in `.env` (not in tracked config)
 - [x] Domain references centralized via .env templates
 - [x] TLS cert expiry monitoring (daily cron at 08:00)

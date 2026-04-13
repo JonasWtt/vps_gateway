@@ -25,19 +25,7 @@ setup: ## Full one-shot setup (run setup.sh)
 	bash setup.sh
 
 render: ## Re-render config templates from .env
-	@bash -c 'set -a; while IFS== read -r k v; do [[ -z "$$k" || "$$k" == \#* ]] && continue; k="$${k# }"; k="$${k% }"; v="$${v# }"; v="$${v% }"; v="$${v//\\$\\$/\\$}"; export "$$k"="$$v"; done < .env; \
-	for t in traefik/dynamic/authentik.yml.template smtp/main.cf.template smtp/sender_rewrite.template; do \
-		dst="$${t%.template}"; \
-		sed -e "s|{{AUTHENTIK_DOMAIN}}|$$AUTHENTIK_DOMAIN|g" \
-		    -e "s|{{TRAEFIK_DOMAIN}}|$$TRAEFIK_DOMAIN|g" \
-		    -e "s|{{BASE_DOMAIN}}|$${AUTHENTIK_DOMAIN#*.}|g" \
-		    -e "s|{{HOSTNAME}}|$$(hostname -f 2>/dev/null || hostname)|g" \
-		    -e "s|{{SMTP_RELAY_HOST}}|$$SMTP_RELAY_HOST|g" \
-		    -e "s|{{SMTP_RELAY_PORT}}|$$SMTP_RELAY_PORT|g" \
-		    -e "s|{{SMTP_RELAY_USER}}|$$SMTP_RELAY_USER|g" \
-		    -e "s|{{TRAEFIK_DASHBOARD_AUTH}}|$$TRAEFIK_DASHBOARD_AUTH|g" \
-		    "$$t" > "$$dst" && echo "Rendered: $$dst"; \
-	done'
+	bash render.sh
 
 # ---------------------------------------------------------------------------
 # Container Management
@@ -136,5 +124,5 @@ clean: ## Remove all containers, volumes, and generated configs
 	rm -rf data/ traefik/logs/
 	@echo "Cleaned. Run 'make setup' to redeploy."
 
-firewall: ## Apply UFW firewall rules (80, 443, 22222 only)
+firewall: ## Apply UFW firewall rules (80, 443, SSH_PORT only)
 	bash firewall.sh

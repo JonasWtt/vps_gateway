@@ -41,7 +41,7 @@ if [ -f .env ]; then
         key="${key# }"; key="${key% }"
         value="${value# }"; value="${value% }"
         export "${key}"="${value}"
-    done < .env
+    done < <(cat .env; echo)
     [ -z "${PG_PASS:-}" ] && err "PG_PASS not set in .env"
     [ -z "${REDIS_PASS:-}" ] && err "REDIS_PASS not set in .env"
     [ -z "${AUTHENTIK_SECRET_KEY:-}" ] && err "AUTHENTIK_SECRET_KEY not set in .env"
@@ -59,32 +59,56 @@ else
     AUTHENTIK_SECRET_KEY=$(openssl rand -base64 60 | tr -d '=/+')
 
     cat > .env << EOF
+# =============================================================================
 # Database
+# =============================================================================
 PG_USER=authentik
 PG_PASS=${PG_PASS}
 PG_DB=authentik
 
+# =============================================================================
 # Redis
+# =============================================================================
 REDIS_PASS=${REDIS_PASS}
 
+# =============================================================================
 # Authentik
+# =============================================================================
 AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY}
 
+# =============================================================================
 # Let's Encrypt
+# =============================================================================
 ACME_EMAIL=you@example.com
 
+# =============================================================================
 # Domain
+# =============================================================================
 AUTHENTIK_DOMAIN=auth.example.com
 TRAEFIK_DOMAIN=traefik.example.com
 
-# SMTP Relay
+# =============================================================================
+# SSH
+# =============================================================================
+# CRITICAL: Set SSH_PORT to your actual SSH port! Wrong value = lockout.
+# Tailscale CGNAT range (100.64.0.0/10) is auto-allowed for SSH.
+SSH_PORT=22
+
+# =============================================================================
+# SMTP Relay (IONOS or other provider)
+# =============================================================================
 SMTP_RELAY_HOST=smtp.example.com
 SMTP_RELAY_PORT=587
 SMTP_RELAY_USER=noreply@example.com
 SMTP_RELAY_PASS=CHANGE_ME
 
-# SSH — CRITICAL: wrong value = lockout!
-SSH_PORT=22
+# =============================================================================
+# Traefik Dashboard
+# =============================================================================
+# Generate with: htpasswd -nb admin <password>
+# Then paste the full output here (e.g. admin:\$\$apr1\$\$xxxx\$\$yyyy)
+# Note: use \$\$ for \$ (docker-compose convention)
+TRAEFIK_DASHBOARD_AUTH=
 EOF
 
     chmod 600 .env
@@ -102,7 +126,7 @@ while IFS='=' read -r key value; do
     # Un-escape $$ → $ for template rendering (docker-compose uses $$ for literal $)
     value="${value//\\$\\$/\\$}"
     export "${key}"="${value}"
-done < .env
+done < <(cat .env; echo)
 
 # Derive BASE_DOMAIN (strip subdomain: auth.example.com → example.com)
 BASE_DOMAIN="${AUTHENTIK_DOMAIN#*.}"
