@@ -1,0 +1,4 @@
+# Sender rewrite map for Postfix
+# All outgoing mail is rewritten to this address
+# Format: regex  replacement
+/^.+$/  noreply@grenzweg.site

@@ -1,0 +1,44 @@
+# Postfix relay-only configuration for IONOS SMTP relay
+# Customize: relayhost, myhostname, mydomain, sender_canonical_maps
+
+compatibility_level = 3.6
+
+# Network — listen on all interfaces (internal Docker network only, no public port mapping)
+inet_interfaces = all
+inet_protocols = ipv4
+mynetworks_style = subnet
+
+# Hostname and domain
+myhostname = gateway.grenzweg.site
+mydomain = grenzweg.site
+myorigin = $mydomain
+
+# No local delivery — relay everything outbound
+mydestination =
+local_recipient_maps =
+local_transport = error:local delivery disabled
+
+# Relay through IONOS (STARTTLS on port 587)
+relayhost = [smtp.ionos.de]:587
+
+# TLS for outbound connections
+smtp_tls_security_level = encrypt
+smtp_tls_wrapper_mode = no
+smtp_tls_loglevel = 1
+
+# SASL authentication for IONOS
+smtp_sasl_auth_enable = yes
+smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+smtp_sasl_security_options = noanonymous
+smtp_sasl_tls_security_options = noanonymous
+
+# Sender rewriting — all outgoing mail appears from noreply@grenzweg.site
+sender_canonical_maps = regexp:/etc/postfix/sender_rewrite
+
+# Resource limits
+message_size_limit = 15728640
+smtp_destination_concurrency_limit = 2
+
+# Security
+disable_vrfy_command = yes
+allow_percent_hack = no

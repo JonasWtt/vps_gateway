@@ -1,0 +1,5 @@
+# SASL password for IONOS SMTP relay
+# Format: [relayhost]:port  username:password
+# After editing, run: sudo postmap smtp/sasl_passwd
+#
+[smtp.ionos.de]:587  noreply@grenzweg.site:YOUR_SMTP_PASSWORD

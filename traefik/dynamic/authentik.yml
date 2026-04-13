@@ -1,0 +1,103 @@
+# =============================================================================
+# Traefik Dynamic Configuration - Hardened
+# =============================================================================
+
+http:
+  # ==========================================================================
+  # MIDDLEWARES
+  # ==========================================================================
+  middlewares:
+    # Security headers for all services
+    security-headers:
+      headers:
+        customResponseHeaders:
+          X-Robots-Tag: "none,noarchive,nosnippet,notranslate,noimageindex"
+          Server: ""
+        sslRedirect: true
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        forceSTSHeader: true
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+        permissionsPolicy: "camera=(), microphone=(), geolocation=()"
+        customRequestHeaders:
+          X-Forwarded-Proto: "https"
+
+    # Rate limiting
+    rate-limit:
+      rateLimit:
+        average: 100
+        burst: 50
+
+    # Dashboard basic auth
+    dashboard-auth:
+      basicAuth:
+        realm: "Traefik Dashboard"
+        users:
+          - "admin:$apr1$1fEOE/E.$ku02KYBJBNeP5hTuop4KE."
+
+    # Dashboard IP allowlist (Tailscale + localhost + private ranges)
+    dashboard-allowlist:
+      ipAllowList:
+        sourceRange:
+          - "127.0.0.1/32"
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+          - "192.168.0.0/16"
+          - "100.64.0.0/10"
+
+  # ==========================================================================
+  # ROUTERS
+  # ==========================================================================
+  routers:
+    # Authentik - main
+    authentik:
+      rule: "Host(`auth.grenzweg.site`)"
+      service: authentik
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      middlewares:
+        - security-headers
+        - rate-limit
+
+    # Authentik - API
+    authentik-api:
+      rule: "Host(`auth.grenzweg.site`) && (PathPrefix(`/api/`) || PathPrefix(`/application/o/`))"
+      service: authentik
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      middlewares:
+        - security-headers
+        - rate-limit
+
+    # Traefik dashboard - restricted access
+    traefik-dashboard:
+      rule: "Host(`traefik.grenzweg.site`)"
+      service: api@internal
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      middlewares:
+        - dashboard-auth
+        - dashboard-allowlist
+
+  # ==========================================================================
+  # SERVICES
+  # ==========================================================================
+  services:
+    authentik:
+      loadBalancer:
+        servers:
+          - url: "http://server:9000"
+        healthCheck:
+          path: /-/health/ready/
+          interval: 10s
+          timeout: 5s

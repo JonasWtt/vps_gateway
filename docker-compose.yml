@@ -1,0 +1,280 @@
+# =============================================================================
+# Authentik + Traefik - Production Hardened
+# =============================================================================
+
+networks:
+  authentik:
+    driver: bridge
+  traefik:
+    driver: bridge
+
+services:
+  # ==========================================================================
+  # PostgreSQL
+  # ==========================================================================
+  postgresql:
+    image: docker.io/library/postgres:16-alpine
+    container_name: authentik-postgresql
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=10m
+      - /run/postgresql:rw,noexec,nosuid,size=10m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 5s
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: ${PG_PASS}
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_DB: ${PG_DB}
+    networks:
+      - authentik
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+
+  # ==========================================================================
+  # Redis
+  # ==========================================================================
+  redis:
+    image: docker.io/library/redis:alpine
+    container_name: authentik-redis
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=10m
+      - /data:rw,noexec,nosuid,size=50m
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASS}
+      --save ""
+      --appendonly no
+      --maxmemory 200mb
+      --maxmemory-policy allkeys-lru
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASS}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 3s
+    networks:
+      - authentik
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+
+  # ==========================================================================
+  # Traefik
+  # ==========================================================================
+  traefik:
+    image: docker.io/library/traefik:v3.0
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=10m
+    command:
+      - "--global.checkNewVersion=false"
+      - "--global.sendAnonymousUsage=false"
+      - "--api.dashboard=true"
+      - "--api.insecure=false"
+      - "--ping=true"
+      - "--providers.file.directory=/etc/traefik/dynamic"
+      - "--providers.file.watch=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      - "--entrypoints.web.http.redirections.entryPoint.permanent=true"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--log.level=INFO"
+      - "--accesslog=true"
+      - "--accesslog.format=json"
+      - "--accesslog.filepath=/var/log/traefik/access.log"
+      - "--serversTransport.insecureSkipVerify=false"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - ./data/certs:/letsencrypt
+      - ./traefik/logs:/var/log/traefik
+    networks:
+      - traefik
+      - authentik
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 256M
+
+  # ==========================================================================
+  # Authentik Server
+  # ==========================================================================
+  server:
+    image: ghcr.io/goauthentik/server:2024.2
+    container_name: authentik-server
+    restart: unless-stopped
+    command: server
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_REDIS__PASSWORD: ${REDIS_PASS}
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__NAME: ${PG_DB}
+      AUTHENTIK_POSTGRESQL__USER: ${PG_USER}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS}
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_ERROR_REPORTING__SEND_PII: "false"
+      AUTHENTIK_COOKIE_SECURE: "true"
+      AUTHENTIK_COOKIE_SAMESITE: "Strict"
+      AUTHENTIK_EMAIL__HOST: smtp
+      AUTHENTIK_EMAIL__PORT: "25"
+      AUTHENTIK_EMAIL__USE_TLS: "false"
+      AUTHENTIK_EMAIL__USE_SSL: "false"
+      AUTHENTIK_EMAIL__FROM: noreply@grenzweg.site
+    volumes:
+      - ./data/media:/media
+      - ./data/certs:/certs
+      - ./data/custom-templates:/templates
+    networks:
+      - authentik
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:9000/-/health/live/')\" || exit 1"]
+      start_period: 90s
+      interval: 30s
+      retries: 5
+      timeout: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  # ==========================================================================
+  # Authentik Worker
+  # ==========================================================================
+  worker:
+    image: ghcr.io/goauthentik/server:2024.2
+    container_name: authentik-worker
+    restart: unless-stopped
+    command: worker
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    user: authentik
+    environment:
+      AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_REDIS__PASSWORD: ${REDIS_PASS}
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__NAME: ${PG_DB}
+      AUTHENTIK_POSTGRESQL__USER: ${PG_USER}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS}
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_ERROR_REPORTING__SEND_PII: "false"
+    volumes:
+      - ./data/media:/media
+      - ./data/certs:/certs
+      - ./data/custom-templates:/templates
+    networks:
+      - authentik
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "open('/proc/1/status').read(); print('ok')"]
+      start_period: 120s
+      interval: 60s
+      retries: 5
+      timeout: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 256M
+
+  # ==========================================================================
+  # SMTP Relay (Postfix → IONOS)
+  # ==========================================================================
+  smtp:
+    image: mwader/postfix-relay:latest
+    container_name: authentik-smtp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+      - FOWNER
+      - CHOWN
+      - SYS_CHROOT
+    volumes:
+      - ./smtp/main.cf:/etc/postfix/main.cf:ro
+      - ./smtp/sasl_passwd.db:/etc/postfix/sasl_passwd.db:ro
+      - ./smtp/sender_rewrite:/etc/postfix/sender_rewrite:ro
+      - smtp-spool:/var/spool/postfix
+    networks:
+      - authentik
+    healthcheck:
+      test: ["CMD-SHELL", "postfix status 2>/dev/null || exit 1"]
+      start_period: 15s
+      interval: 30s
+      retries: 3
+      timeout: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+
+volumes:
+  smtp-spool:
