@@ -1,8 +1,8 @@
 #!/bin/bash
 # =============================================================================
 # UFW Firewall Rules — Authentik + Traefik deployment
-# Reads SSH_PORT and SSH_TAILSCALE_DEVICES from .env.
-# Exposes ONLY: 80/tcp, 443/tcp (public), SSH_PORT (limited to specific Tailscale IPs)
+# Reads SSH_PORT from .env (default: 22).
+# Exposes ONLY: 80/tcp, 443/tcp (public), SSH_PORT (Tailscale + localhost)
 # Removes stale port 22 rule if SSH is on non-standard port.
 # Idempotent — safe to re-run.
 # =============================================================================
@@ -11,14 +11,11 @@ set -euo pipefail
 DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DEPLOY_DIR"
 
-# Load SSH_PORT and SSH_TAILSCALE_DEVICES from .env
+# Load SSH_PORT from .env
 SSH_PORT="${SSH_PORT:-}"
-SSH_TAILSCALE_DEVICES="${SSH_TAILSCALE_DEVICES:-}"
-
 if [ -z "$SSH_PORT" ]; then
     if [ -f .env ]; then
         SSH_PORT=$(grep -E '^SSH_PORT=' .env | head -1 | cut -d= -f2 | tr -d ' ')
-        SSH_TAILSCALE_DEVICES=$(grep -E '^SSH_TAILSCALE_DEVICES=' .env | head -1 | cut -d= -f2 | tr -d ' ')
     fi
     SSH_PORT="${SSH_PORT:-22}"
 fi
@@ -45,26 +42,10 @@ sudo ufw allow 80/tcp comment "HTTP (Traefik)"       2>/dev/null || true
 sudo ufw allow 443/tcp comment "HTTPS (Traefik)"      2>/dev/null || true
 
 # === SSH on configured port ===
-# Allow from localhost
-sudo ufw allow from 127.0.0.1 to any port "${SSH_PORT}" proto tcp comment "SSH localhost" 2>/dev/null || true
-
-# Allow from specific Tailscale devices (if configured)
-if [ -n "$SSH_TAILSCALE_DEVICES" ]; then
-    IFS=',' read -ra DEVICES <<< "$SSH_TAILSCALE_DEVICES"
-    for ip in "${DEVICES[@]}"; do
-        ip=$(echo "$ip" | tr -d ' ')
-        if [ -n "$ip" ]; then
-            echo "  Allowing SSH from Tailscale device: ${ip}"
-            sudo ufw allow from "${ip}" to any port "${SSH_PORT}" proto tcp comment "SSH Tailscale ${ip}" 2>/dev/null || true
-        fi
-    done
-fi
-
-# Allow from full Tailscale CGNAT range as broader fallback
+# Tailscale CGNAT range covers all Tailscale devices
 sudo ufw allow from 100.64.0.0/10 to any port "${SSH_PORT}" proto tcp comment "SSH via Tailscale" 2>/dev/null || true
-
-# Rate-limit SSH as final fallback
-sudo ufw limit "${SSH_PORT}"/tcp comment "SSH rate limit (fallback)" 2>/dev/null || true
+sudo ufw allow from 127.0.0.1 to any port "${SSH_PORT}" proto tcp comment "SSH localhost"           2>/dev/null || true
+sudo ufw limit "${SSH_PORT}"/tcp comment "SSH rate limit (fallback)"                                2>/dev/null || true
 
 # === Remove stale port 22 rule (if SSH is on a different port) ===
 if [ "$SSH_PORT" != "22" ]; then
