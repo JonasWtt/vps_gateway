@@ -27,7 +27,7 @@ cd authentik-traefik
 
 # 2. Copy and edit the environment template
 cp .env.example .env
-vim .env  # Fill in: secrets, domains, SMTP credentials
+nano .env  # Fill in: secrets, domains, SMTP credentials
 
 # 3. Run setup
 ./setup.sh
