@@ -1,5 +1,5 @@
-# SASL password for IONOS SMTP relay
+# SASL password for SMTP relay
 # Format: [relayhost]:port  username:password
-# After editing, run: sudo postmap smtp/sasl_passwd
+# After editing, run: docker compose run --rm smtp postmap /etc/postfix/sasl_passwd
 #
-[smtp.ionos.de]:587  noreply@grenzweg.site:YOUR_SMTP_PASSWORD
+[smtp.example.com]:587  noreply@yourdomain.com:YOUR_SMTP_PASSWORD

@@ -7,7 +7,7 @@
 set -euo pipefail
 
 # --- Configuration ---
-DEPLOY_DIR="/opt/authentik-traefik"
+DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 RESTIC_REPO="/opt/backups/authentik/restic-repo"
 RESTIC_PASSWORD_FILE="/opt/backups/authentik/.restic-password"
 RESTIC_CACHE_DIR="/opt/backups/authentik/.cache"

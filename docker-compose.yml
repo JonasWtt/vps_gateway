@@ -169,7 +169,7 @@ services:
       AUTHENTIK_EMAIL__PORT: "25"
       AUTHENTIK_EMAIL__USE_TLS: "false"
       AUTHENTIK_EMAIL__USE_SSL: "false"
-      AUTHENTIK_EMAIL__FROM: noreply@grenzweg.site
+      AUTHENTIK_EMAIL__FROM: ${SMTP_RELAY_USER}
     volumes:
       - ./data/media:/media
       - ./data/certs:/certs
