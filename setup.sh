@@ -247,6 +247,17 @@ CRON_LINE="0 2 * * * sg backup-access -c '${DEPLOY_DIR}/backup-restic.sh'"
 (crontab -l 2>/dev/null | grep -v "backup-restic"; echo "$CRON_LINE") | crontab -
 log "Backup cron job installed (daily at 02:00)"
 
+# Add cron job for daily TLS cert check
+chmod +x check-certs.sh
+CRON_CERT="0 8 * * * ${DEPLOY_DIR}/check-certs.sh"
+CURRENT_CRON=$(crontab -l 2>/dev/null || true)
+if echo "${CURRENT_CRON}" | grep -q "check-certs"; then
+    log "Cert check cron already installed"
+else
+    echo "${CURRENT_CRON}" | cat - <(echo "${CRON_CERT}") | crontab -
+    log "Cert check cron job installed (daily at 08:00)"
+fi
+
 # =============================================================================
 # 9. Start the stack
 # =============================================================================
