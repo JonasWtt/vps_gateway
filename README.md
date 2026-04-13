@@ -36,10 +36,12 @@ vim .env  # Fill in: secrets, domains, SMTP credentials
 The setup script will:
 - Generate all secrets into `.env`
 - Render config templates from `.env` values
+- Validate `SSH_PORT` — **wrong value = lockout!**
 - Create data directories with proper permissions
 - Build the SMTP SASL password database
 - Initialize the Restic backup repository
 - Configure the Docker daemon for hardening
+- Configure UFW firewall (80, 443, SSH_PORT only)
 - Install fail2ban Authentik jail
 - Install Traefik log rotation
 - Pull images and start all containers
@@ -175,6 +177,7 @@ DKIM is handled by IONOS automatically for their relay.
 - [x] Docker log rotation (10m, 3 files)
 - [x] Traefik access log rotation (7 days, 50M max)
 - [x] fail2ban with 5 jails (sshd, sshd-root, recidive, traefik-scan, authentik)
+- [x] UFW firewall: only 80, 443, and SSH_PORT (configured in .env)
 - [x] Secrets in `.env` (chmod 600, root-owned)
 - [x] Dashboard auth in `.env` (not in tracked config)
 - [x] Domain references centralized via .env templates

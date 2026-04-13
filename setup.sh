@@ -51,6 +51,7 @@ if [ -f .env ]; then
     [ -z "${SMTP_RELAY_HOST:-}" ] && err "SMTP_RELAY_HOST not set in .env"
     [ -z "${SMTP_RELAY_USER:-}" ] && err "SMTP_RELAY_USER not set in .env"
     [ "${SMTP_RELAY_PASS:-}" = "CHANGE_ME" ] && err "SMTP_RELAY_PASS not set in .env"
+    [ -z "${SSH_PORT:-}" ] && err "SSH_PORT not set in .env — CRITICAL: wrong value = lockout. Set it to your actual SSH port."
 else
     log "No .env found — generating from template with random secrets"
     PG_PASS=$(openssl rand -base64 32 | tr -d '=/+')
@@ -81,10 +82,14 @@ SMTP_RELAY_HOST=smtp.example.com
 SMTP_RELAY_PORT=587
 SMTP_RELAY_USER=noreply@example.com
 SMTP_RELAY_PASS=CHANGE_ME
+
+# SSH — CRITICAL: wrong value = lockout!
+SSH_PORT=22
 EOF
 
     chmod 600 .env
-    err "Template .env created with random secrets. Edit .env and re-run setup.sh."
+    err "Template .env created with random secrets. Edit .env and re-run setup.sh.
+IMPORTANT: Set SSH_PORT to your actual SSH port!"
 fi
 
 # Source .env for all following steps
