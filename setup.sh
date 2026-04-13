@@ -244,8 +244,13 @@ chmod +x backup-restic.sh
 
 # Add cron job for daily backups (idempotent)
 CRON_LINE="0 2 * * * sg backup-access -c '${DEPLOY_DIR}/backup-restic.sh'"
-(crontab -l 2>/dev/null | grep -v "backup-restic"; echo "$CRON_LINE") | crontab -
-log "Backup cron job installed (daily at 02:00)"
+CURRENT_CRON=$(crontab -l 2>/dev/null || true)
+if echo "${CURRENT_CRON}" | grep -q "backup-restic"; then
+    log "Backup cron already installed"
+else
+    echo "${CURRENT_CRON}" | cat - <(echo "${CRON_LINE}") | crontab -
+    log "Backup cron job installed (daily at 02:00)"
+fi
 
 # Add cron job for daily TLS cert check
 chmod +x check-certs.sh
