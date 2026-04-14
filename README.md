@@ -233,23 +233,6 @@ net.ipv4.conf.default.log_martians = 1
 
 Apply with: `sudo sysctl --system`
 
-### Current System Audit Findings
-
-The following items were identified on this server as potential hardening opportunities (**not changed yet** — listed for review):
-
-| # | Finding | Risk | Current State | Recommendation |
-|---|---|---|---|---|
-| 1 | `fs.suid_dumpable=2` | Low — allows SUID core dumps (root-readable only) | 2 (softened) | Set to 0 for strictest policy |
-| 2 | `kernel.dmesg_restrict=0` | Medium — any user can read kernel ring buffer | 0 (unrestricted) | Set to 1 |
-| 3 | `kernel.kptr_restrict=0` | Medium — kernel addresses visible via /proc/kallsyms | 0 (unrestricted) | Set to 1 |
-| 4 | `net.core.bpf_jit_harden=0` | Low — BPF JIT not hardened | 0 (off) | Set to 2 |
-| 5 | `net.ipv4.icmp_echo_ignore_broadcasts=0` | Low — responds to ICMP broadcast | 0 (responds) | Set to 1 |
-| 6 | `net.ipv4.tcp_rfc1337=0` | Low — TIME_WAIT assassination not mitigated | 0 (off) | Set to 1 |
-| 7 | No auditd/framework | Medium — no system call auditing | not installed | Install `auditd` for compliance |
-| 8 | `/dev/shm` is world-writable (default) | Low — shared memory abuse potential | 1777 | Consider `nodev,noexec,nosuid` mount options |
-| 9 | No USB/module blacklist | Low — unused kernel modules loaded | default | Blacklist unused modules |
-| 10 | `PermitRootLogin yes` in sshd_config | **High** — root login permitted | yes | Set to `prohibit-password` or `no` |
-
 ### Additional Security Hardening Recommendations (from research)
 
 These go beyond the current setup and are worth considering:
